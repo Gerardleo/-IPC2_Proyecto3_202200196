@@ -196,6 +196,7 @@ def grabarTransaccion():
     print(f"Pagos nuevos: {contadorPagosNuevos}")
     print(f"Pagos duplicados: {contadorPagosDuplicados}")
 
+    crear_xml_respuesta_transac()
 
     return 'Datos procesados correctamente'
 
