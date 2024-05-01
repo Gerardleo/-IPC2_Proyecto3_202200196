@@ -20,12 +20,15 @@ from django.contrib import admin
 from django.urls import path
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('', view.index, name='index'),
+    path('', view.inicio, name='inicio'),
     path('Configuraccion', view.archivoConfig, name='Configuraccion'),
     path('transacciones', view.transacciones, name='transacciones'),
     path('borrarDatos', view.borrarDatos, name='borrarDatos'),
     path('cargaArchivoTranscciones', view.cargaArchivoTranscciones, name='cargaArchivoTranscciones'),
     path('cargarArchivoConfig', view.cargarArchivoConfig, name='cargarArchivoConfig'),
     path('EliminarDatos', view.eliminarDatos, name='EliminarDatos'),
+    path('estado_cuenta', view.estado_cuenta, name='estado_cuenta'),
+    path('obtenerEstadoCuenta', view.obtenerEstadoCuenta, name='obtenerEstadoCuenta'),
+    path('resumenBancos', view.resumenBancos, name='resumenBancos'),
+    path('obtenerResumenBancos', view.obtenerResumenBancos, name='obtenerResumenBancos'),
 ]

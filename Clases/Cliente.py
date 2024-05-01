@@ -15,3 +15,9 @@ class Cliente:
 
     def setNit(self, nit):
         self.nit = nit
+
+    def getSaldo(self):
+        return self.saldo
+    
+    def setSaldo(self, saldo):
+        self.saldo += saldo

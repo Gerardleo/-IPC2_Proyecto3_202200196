@@ -1,0 +1,163 @@
+{% extends 'index.html' %}
+
+{% block title %}Página de Inicio{% endblock %}
+
+{% block contenido %}
+
+<div class="container mt-5">
+    <form id="formFecha" class="form-inline mt-3 text-center" method="GET" action="{% url 'obtenerResumenBancos' %}"
+        enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="fecha" class="mr-sm-2">Fecha:</label>
+        <input type="date" class="form-control mr-sm-2" id="fecha" name="fecha" required>
+        <button type="submit" class="btn btn-primary" onclick="mostrarSpinner()">Generar Resumen</button>
+        <div id="spinner" style="display: none;">
+            <!-- Aquí puedes colocar tu spinner -->
+        </div>
+    </form>
+</div>
+{% if mensaje %}
+{% if mensaje != 'Error al obtener los datos' %}
+<div class="alert alert-success mt-3" role="alert">
+    {{ mensaje }}
+</div>
+{% else %}
+<div class="alert alert-danger mt-3" role="alert">
+    {{ mensaje }}
+</div>
+{% endif %}
+<button class="btn btn-primary" id="btnGenerarPDF">Imprimir</button>
+{% endif %}
+{% if json %}
+<div id="resumenBanco" class="mt-4">
+    <canvas id="myChart"></canvas>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.0/html2pdf.bundle.min.js"></script>
+
+    <script>
+        var resumenData = JSON.parse('{{ json|escapejs }}');
+
+        function obtenerNombreMes(numMes) {
+            var meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+            return meses[numMes - 1];
+        }
+
+        var labels = [];
+        var datasets = [];
+        var bancos = [];
+        var colores = ['rgba(255, 99, 132, 0.5)', 'rgba(54, 162, 235, 0.5)', 'rgba(255, 206, 86, 0.5)', 'rgba(75, 192, 192, 0.5)', 'rgba(153, 102, 255, 0.5)', 'rgba(255, 159, 64, 0.5)'];  // Definir colores para las columnas
+
+        for (var numMes in resumenData) {
+            var nombreMes = obtenerNombreMes(numMes);
+            labels.push(nombreMes);
+
+            resumenData[numMes].forEach(function (item) {
+                if (!bancos.includes(item.banco)) {
+                    bancos.push(item.banco);
+                }
+            });
+        }
+
+        bancos.sort();
+
+        bancos.forEach(function (banco, index) {
+            var data = [];
+            for (var numMes in resumenData) {
+                var totalMes = 0;
+                resumenData[numMes].forEach(function (item) {
+                    if (item.banco === banco) {
+                        totalMes = item.total;
+                    }
+                });
+                data.push(totalMes);
+            }
+
+            datasets.push({
+                label: banco,
+                data: data,
+                backgroundColor: colores[index % colores.length],  // Usar colores diferentes para cada banco
+                borderColor: 'rgba(0, 0, 0, 1)',
+                borderWidth: 1
+            });
+        });
+
+        var ctx = document.getElementById('myChart').getContext('2d');
+        var myChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: datasets
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        setTimeout(function () {
+            document.querySelector('.alert').style.display = 'none';
+        }, 2000);
+
+        document.getElementById('btnGenerarPDF').addEventListener('click', () => {
+        const canvas = document.getElementById('myChart');
+        const image = canvas.toDataURL(); // Obtener la imagen de la gráfica como base64
+
+        // Definir la estructura del PDF con pdfmake
+        const docDefinition = {
+            content: [
+                { text: 'Gráfica de depositos', style: 'header' },
+                { image: image, width: 400, height: 200 },
+                { text: 'Datos de la Gráfica:', style: 'subheader' },
+                {
+                        table: {
+                        headerRows: 1,
+                        widths: ['*', '*', '*', '*'],
+                        body: [
+                            ['Mes', 'Banco', 'Total'],
+                            ...Object.keys(resumenData).map(numMes => {
+                                const nombreMes = obtenerNombreMes(numMes);
+                                return resumenData[numMes].map(item => {
+                                    return [nombreMes, item.banco, item.total];
+                                });
+                            }).flat()
+                        ]
+                    }
+                }],
+            styles: {
+                header: { fontSize: 18, bold: true },
+                subheader: { fontSize: 14, bold: true, margin: [0, 15, 0, 5] }
+            }
+        };
+
+        // Generar y descargar el PDF con pdfmake
+        pdfMake.createPdf(docDefinition).download('mi_grafica.pdf');
+    });
+    </script>
+</div>
+{% endif %}
+
+
+<!-- Scripts de Bootstrap y Spin.js -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Incluir una versión compatible de Spin.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/spin.js/2.3.2/spin.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.68/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.68/vfs_fonts.js"></script>
+
+<script>
+    function mostrarSpinner() {
+        var target = document.getElementById('spinner');
+        var spinner = new Spinner().spin(target); // Crear y mostrar el spinner
+        target.style.display = 'block'; // Mostrar el contenedor del spinner
+    }
+
+    
+</script>
+
+<!-- Agrega este elemento donde quieras que aparezca el gráfico -->
+<canvas id="grafico" width="400" height="200"></canvas>
+{% endblock %}

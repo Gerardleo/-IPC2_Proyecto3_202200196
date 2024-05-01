@@ -14,7 +14,7 @@
             <valor> 200 </valor>
         </factura>
         <factura>
-            <numeroFactura> aaa2443q </numeroFactura>
+            <numeroFactura> aaa24431q </numeroFactura>
             <NITcliente> 987654 </NITcliente>
             <fecha> 24/02/2024 </fecha>
             <valor> 300 </valor>
@@ -22,7 +22,7 @@
         <factura>
             <numeroFactura> bbb2443q </numeroFactura>
             <NITcliente> 585858 </NITcliente>
-            <fecha> 24/02/2024 </fecha>
+            <fecha> zxczczxc 24/02/2024 </fecha>
             <valor> 400 </valor>
         
         </factura>
@@ -33,6 +33,18 @@
             <fecha> 25/02/2024 </fecha>
             <NITcliente> 123456 </NITcliente>
             <valor> 200 </valor>
+        </pago>
+        <pago>
+            <codigoBanco> 654321 </codigoBanco>
+            <fecha> 25/02/2023 </fecha>
+            <NITcliente> 654321 </NITcliente>
+            <valor> 300 </valor>
+        </pago>
+        <pago>
+            <codigoBanco> 987654 </codigoBanco>
+            <fecha> 25/02/2022 </fecha>
+            <NITcliente> 987654 </NITcliente>
+            <valor> -400 </valor>
         </pago>
     </pagos>
 </transacciones>

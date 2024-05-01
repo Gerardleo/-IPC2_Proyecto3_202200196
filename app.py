@@ -1,3 +1,4 @@
+from collections import defaultdict
 import json
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as minidom
@@ -7,13 +8,17 @@ from Clases.Cliente import Cliente as C
 from Clases.Banco import Banco as B
 from Clases.Factura import Factura as F
 from Clases.Pago import Pago as P
-#from unidecode import unidecode
-#from datetime import datetime
-#from collections import defaultdict
+from datetime import datetime
 from flask import send_file
-#import re
-
-
+import re
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import landscape
+from reportlab.platypus import Table, TableStyle, PageBreak
+from io import BytesIO
+import os
+import webbrowser
 
 app = Flask(__name__)
 
@@ -44,6 +49,18 @@ def buscar_Banco(codigo):
         if banco.getCodigo() == codigo:
             return True
     return False
+
+def agregarSaldo(nit, valor):
+    for cliente in Clientes:
+        if cliente.getNit() == nit:
+            cliente.setSaldo(valor)
+            break
+
+def restarSaldo(nit, valor):
+    for cliente in Clientes:
+        if cliente.getNit() == nit:
+            cliente.setSaldo(-valor)
+            break
         
 def buscar_Cliente(nit):
     for cliente in Clientes:
@@ -57,11 +74,37 @@ def buscar_Factura(numFactura):
             return True
     return False
 
-def buscar_Pago(codigoBanco, fecha, nit, valor):
+def buscar_Pago(codigoBanco, fecha, nit):
     for pago in Pagos:
-        if pago.getCodigoBanco() == codigoBanco and pago.getFecha() == fecha and pago.getNit() == nit and pago.getValor() == valor:
+        if pago.getCodigoBanco() == codigoBanco and pago.getFecha() == fecha and pago.getNit() == nit:
             return True
     return False
+
+def retornarFacturas(nit):
+    facturas = []
+    for factura in Facturas:
+        if factura.getNit() == nit:
+            facturas.append(factura)
+    return facturas
+
+def retornarPagos(nit):
+    pagos = []
+    for pago in Pagos:
+        if pago.getNit() == nit:
+            pagos.append(pago)
+    return pagos
+
+def retornarCliente(nit):
+    for cliente in Clientes:
+        if cliente.getNit() == nit:
+            return cliente
+    return None
+
+def nombreBanco(codigo):
+    for banco in Bancos:
+        if banco.getCodigo() == codigo:
+            return banco.getNombre()
+    return None
 
 # Rutas
 @app.route('/grabarConfiguracion', methods=['POST'])
@@ -151,52 +194,82 @@ def crear_xml_config():
 
 @app.route('/grabarTransaccion', methods=['POST'])
 def grabarTransaccion():
-    global  contadorFacturasNuevas, contadorPagosNuevos, contadorFacturasDuplicadas, contadorPagosDuplicados
+    global  contadorFacturasNuevas, contadorPagosNuevos, contadorFacturasDuplicadas, contadorPagosDuplicados, contadorPagosConError, contadorFacturasConError
     archivo = request.files.get('archivo')
-    
-    if archivo.filename == '':
-        return jsonify({"error": "No se ha proporcionado ningún archivo"}), 400
+    try:
+        if archivo.filename == '':
+            return jsonify({"error": "No se ha proporcionado ningún archivo"}), 400
 
-    tree = ET.parse(archivo)
-    root = tree.getroot()
+        tree = ET.parse(archivo)
+        root = tree.getroot()
 
-    for factura in root.findall('.//factura'):
-        numFactura = factura.find('numeroFactura').text.strip()
-        nit = factura.find('NITcliente').text.strip()
-        fecha = factura.find('fecha').text.strip()
-        valor = factura.find('valor').text.strip()
-        nueva_factura = F(numFactura, nit, fecha, valor)
-        if buscar_Factura(numFactura):
-            contadorFacturasDuplicadas += 1
-        else:
-            contadorFacturasNuevas += 1
-            Facturas.append(nueva_factura)
+        for factura in root.findall('.//factura'):
+            numFactura = factura.find('numeroFactura').text.strip()
+            nit = factura.find('NITcliente').text.strip()
+            fechaString = factura.find('fecha').text.strip()
+            validador = re.search(r"([0-2][0-9]|3[0-1])(/)(0[1-9]|1[0-2])\2(\d{4})", fechaString)
+            if validador is None:
+                contadorFacturasConError += 1
+            else:
+                fecha_str = validador.group()
+                dia, mes, anio = map(int, fecha_str.split('/'))
+                fecha = datetime(anio, mes, dia)
+                valor = float(factura.find('valor').text.strip())
+                nueva_factura = F(numFactura, nit, fecha, valor)
+                if buscar_Cliente(nit) == False or valor < 0:
+                    contadorFacturasConError += 1
+                else:
+                    if buscar_Factura(numFactura):
+                        contadorFacturasDuplicadas += 1
+                    else:
+                        contadorFacturasNuevas += 1
+                        agregarSaldo(nit, valor)
+                        Facturas.append(nueva_factura)    
+            
 
-    for pago in root.findall('.//pago'):
-        codigoBanco = pago.find('codigoBanco').text.strip()
-        fecha = pago.find('fecha').text.strip()
-        nit = pago.find('NITcliente').text.strip()
-        valor = pago.find('valor').text.strip()
-        nuevo_pago = P(codigoBanco, fecha, nit, valor)
-        if buscar_Pago(codigoBanco, fecha, nit, valor):
-            contadorPagosDuplicados += 1
-        else:
-            contadorPagosNuevos += 1
-            Pagos.append(nuevo_pago)
+        for pago in root.findall('.//pago'):
+            codigoBanco = pago.find('codigoBanco').text.strip()
+            fechaString = pago.find('fecha').text.strip()
+            validador = re.search(r"([0-2][0-9]|3[0-1])(/)(0[1-9]|1[0-2])\2(\d{4})", fechaString)
+            if validador is None:
+                contadorPagosConError += 1
+            else:
+                fecha_str = validador.group()
+                dia, mes, anio = map(int, fecha_str.split('/'))
+                fecha = datetime(anio, mes, dia)
+                valor = float(factura.find('valor').text.strip())
+                nueva_factura = F(numFactura, nit, fecha, valor)
+                nit = pago.find('NITcliente').text.strip()
+                valor = float(pago.find('valor').text.strip())
+                if buscar_Cliente(nit) == False or buscar_Banco(codigoBanco) == False or valor < 0:
+                    contadorPagosConError += 1
+                else:
+                    nuevo_pago = P(codigoBanco, fecha, nit, valor)
+                    if buscar_Pago(codigoBanco, fecha, nit):
+                        contadorPagosDuplicados += 1
+                    else:
+                        contadorPagosNuevos += 1
+                        Pagos.append(nuevo_pago)
+                        restarSaldo(nit, valor)
 
 
-    for factura in Facturas:
-        print(factura.getNumFactura(), factura.getNit(), factura.getFecha(), factura.getValor())
+        for factura in Facturas:
+            print(factura.getNumFactura(), factura.getNit(), factura.getFecha(), factura.getValor())
 
-    for pago in Pagos:
-        print(pago.getCodigoBanco(), pago.getFecha(), pago.getNit(), pago.getValor())
+        for pago in Pagos:
+            print(pago.getCodigoBanco(), pago.getFecha(), pago.getNit(), pago.getValor())
 
-    print(f"Facturas nuevas: {contadorFacturasNuevas}")
-    print(f"Facturas duplicadas: {contadorFacturasDuplicadas}")
-    print(f"Pagos nuevos: {contadorPagosNuevos}")
-    print(f"Pagos duplicados: {contadorPagosDuplicados}")
+        print(f"Facturas nuevas: {contadorFacturasNuevas}")
+        print(f"Facturas duplicadas: {contadorFacturasDuplicadas}")
+        print(f"Facturas con error: {contadorFacturasConError}")
+        print(f"Pagos nuevos: {contadorPagosNuevos}")
+        print(f"Pagos duplicados: {contadorPagosDuplicados}")
+        print(f"Pagos con error: {contadorPagosConError}")
 
-    crear_xml_respuesta_transac()
+
+        crear_xml_respuesta_transac()
+    except Exception as e:
+        print(e)
 
     return 'Datos procesados correctamente'
 
@@ -258,332 +331,255 @@ def limpiarDatos():
 
     return 'Datos limpiados correctamente'
 
-# @app.route('/obtenerHistorialConfiguraciones', methods=['GET'])
-# def obtener_historial_configuraciones():
-#     return jsonify({"historial_configuraciones": historial_configuraciones})
+def ordenar_por_fecha_descendente(objetos):
+    return sorted(objetos, key=lambda x: x['fecha'], reverse=False)
 
+# Función para unificar y ordenar créditos y débitos en un solo estado de cuenta
+def unificar_y_ordenar_estado_cuenta(debitos, creditos):
+    estado_cuenta = {
+        "cliente": "",
+        "nit": "",
+        "saldo": 0,
+        "movimientos": []
+    }
 
-# @app.route('/generarSalidaTransac', methods=['GET'])
-# def generar_archivo_resumen_config():
-#     global palabras_positivas, palabras_negativas, palabras_negativas_rechazadas, palabras_positivas_rechazadas, historial_configuraciones,palabras_neutras
+    # Agregar débitos al estado de cuenta
+    for debito in debitos:
+        estado_cuenta["movimientos"].append({
+            "tipo": "debito",
+            "num_factura": debito['num_factura'],
+            "fecha": debito['fecha'],
+            "valor": debito['valor'],
+        })
 
-#     archivo_salida = "resumenConfig.xml"
+    # Agregar créditos al estado de cuenta
+    for credito in creditos:
+        estado_cuenta["movimientos"].append({
+            "tipo": "credito",
+            "codigo_banco": credito['codigo_banco'],
+            "fecha": credito['fecha'],
+            "valor": credito['valor'],
+            "banco": credito['banco']
+        })
 
-#     # Crear el documento XML de salida
-#     doc = Document()
-#     config_recibida = doc.createElement('CONFIG_RECIBIDA')
-#     doc.appendChild(config_recibida)
+    # Ordenar el estado de cuenta combinado por fecha de manera descendente
+    estado_cuenta["movimientos"] = ordenar_por_fecha_descendente(estado_cuenta["movimientos"])
 
-#     for configuracion in historial_configuraciones:
-#         configuracion_element = doc.createElement('CONFIGURACION')
-#         config_recibida.appendChild(configuracion_element)
+    return estado_cuenta
 
-#         fecha_element = doc.createElement('FECHA')
-#         fecha_element.appendChild(doc.createTextNode(configuracion['fecha']))
-#         configuracion_element.appendChild(fecha_element)  # Adjuntado dentro de configuracion_element
+# Ruta para obtener el estado de cuenta unificado y ordenado
+@app.route('/devolverEstadoCuenta', methods=['GET'])
+def devolverEstadoCuenta():
+    try:
+        nit = request.form.get('nit')
 
-#         hora_element = doc.createElement('HORA')
-#         hora_element.appendChild(doc.createTextNode(configuracion['hora']))
-#         configuracion_element.appendChild(hora_element)  # Adjuntado dentro de configuracion_element
+        debitos = []
+        creditos = []
+        lista_movimientos = []
+        if nit == '':
+            # Todos los clientes
+            lista_movimientos = []
+            for cliente in Clientes:
+                debitos = []
+                creditos = []
+                facturas = retornarFacturas(cliente.getNit())
+                pagos = retornarPagos(cliente.getNit())
 
-#         palabras_positivas_element = doc.createElement('PALABRAS_POSITIVAS')
-#         palabras_positivas_element.appendChild(doc.createTextNode(str(configuracion['palabras_positivas'])))
-#         configuracion_element.appendChild(palabras_positivas_element)  # Adjuntado dentro de configuracion_element
+                for factura in facturas:
+                    debitos.append({
+                        "num_factura": factura.getNumFactura(),
+                        "fecha": factura.getFecha().strftime("%d/%m/%Y"),
+                        "valor": factura.getValor(),
+                    })
 
-#         # Agregar el número de palabras positivas rechazadas
-#         palabras_positivas_rechazadas_element = doc.createElement('PALABRAS_POSITIVAS_RECHAZADAS')
-#         palabras_positivas_rechazadas_element.appendChild(doc.createTextNode(str(configuracion['palabras_positivas_rechazadas'])))
-#         configuracion_element.appendChild(palabras_positivas_rechazadas_element)  # Adjuntado dentro de configuracion_element
+                for pago in pagos:
+                    creditos.append({
+                        "codigo_banco": pago.getCodigoBanco(),
+                        "fecha": pago.getFecha().strftime("%d/%m/%Y"),
+                        "valor": pago.getValor(),
+                        "banco": nombreBanco(pago.getCodigoBanco())
+                    })
+                
+                estado_cuenta = unificar_y_ordenar_estado_cuenta(debitos, creditos)
+                estado_cuenta["cliente"] = cliente.getNombre()
+                estado_cuenta["nit"] = cliente.getNit()
+                estado_cuenta["saldo"] = cliente.getSaldo()
+                lista_movimientos.append(estado_cuenta)
 
-#         # Agregar el número de palabras negativas acumuladas
-#         palabras_negativas_element = doc.createElement('PALABRAS_NEGATIVAS')
-#         palabras_negativas_element.appendChild(doc.createTextNode(str(configuracion['palabras_negativas'])))
-#         configuracion_element.appendChild(palabras_negativas_element)  # Adjuntado dentro de configuracion_element
+            lista_movimientos.sort(key=lambda x: x['nit'], reverse=True)
+            descargar_pdf(lista_movimientos)
+            return jsonify(lista_movimientos)
 
-#         # Agregar el número de palabras negativas rechazadas
-#         palabras_negativas_rechazadas_element = doc.createElement('PALABRAS_NEGATIVAS_RECHAZADAS')
-#         palabras_negativas_rechazadas_element.appendChild(doc.createTextNode(str(configuracion['palabras_negativas_rechazadas'])))
-#         configuracion_element.appendChild(palabras_negativas_rechazadas_element)  # Adjuntado dentro de configuracion_element
-
-#         palabras_neutras_element = doc.createElement('PALABRAS_NEUTRAS')
-#         palabras_neutras_element.appendChild(doc.createTextNode(str(configuracion['palabras_neutras'])))
-#         configuracion_element.appendChild(palabras_neutras_element)  # Adjuntado dentro de configuracion_element
-
-#         # Agregar los demás datos de configuración (palabras positivas, negativas, rechazadas, etc.)
-
-#     # Generar el archivo de salida en el formato deseado
-#     with open(archivo_salida, 'w', encoding='utf-8') as output_file:
-#         output_file.write(doc.toprettyxml(indent=" "))
-    
-#     return "Archivo de salida generado con éxito"
-
-# @app.route('/limpiarDatos', methods=['POST'])
-# def reiniciar_datos_globales():
-#     global mensajes_recibidos, usuarios_mencionados, hashtags_incluidos, palabras_positivas, palabras_negativas, palabras_negativas_rechazadas, palabras_positivas_rechazadas, historial_configuraciones
-#     mensajes_recibidos = {}
-#     usuarios_mencionados = set()
-#     hashtags_incluidos = set()
-#     palabras_positivas = 0
-#     palabras_negativas = 0
-#     palabras_neutras = 0
-#     palabras_negativas_rechazadas = 0
-#     palabras_positivas_rechazadas = 0
-#     historial_configuraciones = []
-
-#     return json.dumps({
-#         "mensajes_recibidos": mensajes_recibidos,
-#         "usuarios_mencionados": list(usuarios_mencionados),
-#         "hashtags_incluidos": list(hashtags_incluidos),
-#         "palabras_positivas": palabras_positivas,
-#         "palabras_negativas": palabras_negativas,
-#         "palabras_neutras": palabras_neutras,
-#         "palabras_negativas_rechazadas": palabras_negativas_rechazadas,
-#         "palabras_positivas_rechazadas": palabras_positivas_rechazadas,
-#         "configuracion_por_fecha": historial_configuraciones
-#     }, indent=4)
-
-# @app.route('/devolverHashtags', methods=['GET'])
-# def contar_hashtags():
-#     global mensajes_recibidos
-#     codigoRespuesta = 1
-
-#     hashtags_contados = {}  # Diccionario para almacenar los hashtags y sus cantidades
-
-#     for mensajes in mensajes_recibidos.values():
-#         for mensaje in mensajes:
-#             for hashtag in mensaje['HASH_INCLUIDOS']:
-#                 if hashtag in hashtags_contados:
-#                     hashtags_contados[hashtag] += 1
-#                 else:
-#                     hashtags_contados[hashtag] = 1
-
-#     if not hashtags_contados:
-#         codigoRespuesta = 0
-#         return jsonify({"codigo":codigoRespuesta,"mensaje":"No se encontraron hashtags en los mensajes."}), 404
-#     else:
-#         return jsonify({"codigo":codigoRespuesta,"hashtags_contados": hashtags_contados})
-
-# @app.route('/devolverMenciones', methods=['GET'])
-# def contar_menciones():
-#     global mensajes_recibidos
-#     codigoRespuesta = 1
-#     menciones_contadas = {}  # Diccionario para almacenar las menciones y sus cantidades
-
-#     for mensajes in mensajes_recibidos.values():
-#         for mensaje in mensajes:
-#             for mencion in mensaje['USR_MENCIONADOS']:
-#                 if mencion in menciones_contadas:
-#                     menciones_contadas[mencion] += 1
-#                 else:
-#                     menciones_contadas[mencion] = 1
-
-#     if not menciones_contadas:
-#         codigoRespuesta = 0
-#         return jsonify({"codigo":codigoRespuesta,"mensaje":"No se encontraron menciones en los mensajes."}), 404
-#     else:
-#         return jsonify({"codigo":codigoRespuesta,"menciones_usuario": menciones_contadas})
-
-# @app.route('/grabarDatos', methods=['POST'])
-# def grabarDatos():
-#     # Tu código para procesar los mensajes
-
-#     # Guardar los datos en un archivo JSON
-#     with open('datos.json', 'w') as json_file:
-#         data = {
-#             "mensajes_recibidos": mensajes_recibidos,
-#             "usuarios_mencionados": list(usuarios_mencionados),
-#             "hashtags_incluidos": list(hashtags_incluidos),
-#             "menciones_usuario": menciones_usuario,
-#             "menciones_hashtag": menciones_hashtag,
-#             "palabras_positivas": palabras_positivas,
-#             "palabras_negativas": palabras_negativas,
-#             "palabras_negativas_rechazadas": palabras_negativas_rechazadas,
-#             "palabras_positivas_rechazadas": palabras_positivas_rechazadas,
-#             "configuracion_por_fecha": historial_configuraciones
-#         }
-#         json.dump(data, json_file)
-        
-#     return 'Datos guardados con éxito'
-
-
-
-# @app.route('/obtenerHashtagsPorRango', methods=['GET'])
-# def contar_hashtags_por_rango():
-#     codigoRespuesta = 1
-#     fecha_inicio = request.form.get('fecha_inicio')
-#     fecha_fin = request.form.get('fecha_fin')
-    
-#     if fecha_inicio is None or fecha_fin is None:
-#         return jsonify({"error": "Las fechas de inicio y fin son requeridas"}), 400
-
-#     hashtags_por_fecha = defaultdict(lambda: defaultdict(int))  # Diccionario para contar hashtags por fecha
-
-#     # Iterar a través de las fechas dentro del rango
-#     for fecha in mensajes_recibidos:
-#         if fecha_inicio <= fecha <= fecha_fin:
-#             for mensaje in mensajes_recibidos[fecha]:
-#                 hashtags = mensaje['HASH_INCLUIDOS']
-#                 for hashtag in hashtags:
-#                     hashtags_por_fecha[fecha][hashtag] += 1
-
-#     if not hashtags_por_fecha:
-#         codigoRespuesta = 0
-#         return jsonify({"codigo": codigoRespuesta, "mensaje": "No se encontraron hashtags en el rango de fechas proporcionado."}), 404
-
-#     # Organizar los hashtags por fecha
-#     resultado = {
-#         "codigo": codigoRespuesta,
-#         "hashtags_por_fecha": dict(hashtags_por_fecha),
-#         "hashtags_totales": defaultdict(int)
-#     }
-
-#     # Calcular el contador total
-#     for fecha, hashtags in hashtags_por_fecha.items():
-#         for hashtag, conteo in hashtags.items():
-#             resultado["hashtags_totales"][hashtag] += conteo
-
-#     return jsonify(resultado)
-
-
-# @app.route('/obtenerMencionesPorRango', methods=['GET'])
-# def contar_menciones_por_rango():
-#     codigoRespuesta = 1
-#     fecha_inicio = request.form.get('fecha_inicio')
-#     fecha_fin = request.form.get('fecha_fin')
-
-#     if fecha_inicio is None or fecha_fin is None:
-#         return jsonify({"Las fechas de inicio y fin son requeridas"}), 400
-
-#     menciones_por_fecha = defaultdict(lambda: defaultdict(int))  # Diccionario para contar menciones por fecha
-
-#     # Iterar a través de las fechas dentro del rango
-#     for fecha in mensajes_recibidos:
-#         if fecha_inicio <= fecha <= fecha_fin:
-#             for mensaje in mensajes_recibidos[fecha]:
-#                 menciones = mensaje['USR_MENCIONADOS']
-#                 for mencion in menciones:
-#                     menciones_por_fecha[fecha][mencion] += 1
-
-#     if not menciones_por_fecha:
-#         codigoRespuesta = 0
-#         return jsonify({"codigo": codigoRespuesta, "mensaje": "No se encontraron menciones en el rango de fechas proporcionado."}), 404
-
-#     # Organizar las menciones por fecha
-#     resultado = {
-#         "codigo": codigoRespuesta,
-#         "menciones_por_fecha": dict(menciones_por_fecha),
-#         "menciones_usuario_totales": defaultdict(int)
-#     }
-
-#     # Calcular el contador total
-#     for fecha, menciones in menciones_por_fecha.items():
-#         for mencion, conteo in menciones.items():
-#             resultado["menciones_usuario_totales"][mencion] += conteo
-
-#     return jsonify(resultado)
-
-# @app.route('/consultarSentimientos', methods=['GET'])
-# def consultar_sentimientos():
-#     codigoRespuesta = 1
-#     fecha_inicio_str = request.form.get('fecha_inicio')
-#     fecha_fin_str = request.form.get('fecha_fin')
-
-#     if not fecha_inicio_str or not fecha_fin_str:
-#         # Si falta alguno de los parámetros, devuelve un mensaje de error
-#         return jsonify({"Mensaje": "Los parámetros 'fecha_inicio' y 'fecha_fin' son obligatorios."}), 400
-
-#     # Convierte las fechas de cadena a objetos datetime
-#     fecha_inicio = datetime.strptime(fecha_inicio_str, "%d-%m-%Y")
-#     fecha_fin = datetime.strptime(fecha_fin_str, "%d-%m-%Y")
-
-#     # Inicializar un diccionario para almacenar las menciones de palabras por fecha y hora, incluyendo segundos
-#     menciones_por_fecha_hora = defaultdict(dict)
-
-#     # Calcular el total de palabras en todas las configuraciones dentro del rango de fechas
-#     total_palabras_positivas = 0
-#     total_palabras_negativas = 0
-#     total_palabras_positivas_rechazadas = 0
-#     total_palabras_negativas_rechazadas = 0
-#     total_palabras_neutras = 0
-
-#     for configuracion in historial_configuraciones:
-#         fecha_configuracion = datetime.strptime(configuracion["fecha"], "%d/%m/%Y")
-#         hora_configuracion = configuracion.get("hora", "")
-        
-#         if fecha_inicio <= fecha_configuracion <= fecha_fin:
-#             palabras_positivas = configuracion.get("palabras_positivas", 0)
-#             palabras_negativas = configuracion.get("palabras_negativas", 0)
-#             palabras_neutras = configuracion.get("palabras_neutras", 0)
-#             palabras_positivas_rechazadas = configuracion.get("palabras_positivas_rechazadas", 0)
-#             palabras_negativas_rechazadas = configuracion.get("palabras_negativas_rechazadas", 0)
-
-#             # Actualizar los totales de palabras
-#             total_palabras_positivas += palabras_positivas
-#             total_palabras_negativas += palabras_negativas
-#             total_palabras_neutras += palabras_neutras
-#             total_palabras_positivas_rechazadas += palabras_positivas_rechazadas
-#             total_palabras_negativas_rechazadas += palabras_negativas_rechazadas
-
-#             # Construir la clave para la fecha y hora, incluyendo segundos
-#             fecha_hora_str = f"{fecha_configuracion.strftime('%d/%m/%Y')} {hora_configuracion}"
-
-#             # Actualizar las menciones de palabras por fecha y hora
-#             menciones_por_fecha_hora[fecha_hora_str]["palabras_positivas"] = palabras_positivas
-#             menciones_por_fecha_hora[fecha_hora_str]["palabras_negativas"] = palabras_negativas
-#             menciones_por_fecha_hora[fecha_hora_str]["palabras_positivas_rechazadas"] = palabras_positivas_rechazadas
-#             menciones_por_fecha_hora[fecha_hora_str]["palabras_negativas_rechazadas"] = palabras_negativas_rechazadas
-#             menciones_por_fecha_hora[fecha_hora_str]["palabras_neutras"] = palabras_neutras
             
-#     if not menciones_por_fecha_hora:
-#         codigoRespuesta = 0
-#         return jsonify({"codigo": codigoRespuesta, "mensaje": "No se encontraron sentimientos en el rango de fechas proporcionado."}), 404
+        else:
+            # cliente con nit específico
+            if buscar_Cliente(nit):
+                lista_movimientos = []
+                cliente = retornarCliente(nit)
+                facturas = retornarFacturas(nit)
+                pagos = retornarPagos(nit)
 
-#     return jsonify({
-#         "codigo": codigoRespuesta,
-#         "menciones_por_fecha_hora": menciones_por_fecha_hora,
-#         "total_palabras": {
-#             "positivas": total_palabras_positivas,
-#             "negativas": total_palabras_negativas,
-#             "neutras": total_palabras_neutras,
-#             "positivas_rechazadas": total_palabras_positivas_rechazadas,
-#             "negativas_rechazadas": total_palabras_negativas_rechazadas
-#         }
-#     })
+                for factura in facturas:
+                    debitos.append({
+                        "num_factura": factura.getNumFactura(),
+                        "fecha": factura.getFecha().strftime("%d/%m/%Y"),
+                        "valor": factura.getValor(),
+                    })
 
-# if __name__ == "__main__":
-#     # try:
-#     #     with open('datos.json', 'r') as json_file:
-#     #         data = json.load(json_file)
-#     #         mensajes_recibidos = data.get("mensajes_recibidos", {})
-#     #         usuarios_mencionados = set(data.get("usuarios_mencionados", []))
-#     #         hashtags_incluidos = set(data.get("hashtags_incluidos", []))
-#     #         menciones_usuario = data.get("menciones_usuario", {})
-#     #         menciones_hashtag = data.get("menciones_hashtag", {})
-#     #         palabras_positivas = data.get("palabras_positivas", 0)
-#     #         palabras_negativas = data.get("palabras_negativas", 0)
-#     #         palabras_neutras = data.get("palabras_neutras", 0)  
-#     #         palabras_negativas_rechazadas = data.get("palabras_negativas_rechazadas", 0) 
-#     #         palabras_positivas_rechazadas = data.get("palabras_positivas_rechazadas", 0)
-#     #         historial_configuraciones = data.get("configuracion_por_fecha", [])
+                for pago in pagos:
+                    creditos.append({
+                        "codigo_banco": pago.getCodigoBanco(),
+                        "fecha": pago.getFecha().strftime("%d/%m/%Y"),
+                        "valor": pago.getValor(),
+                        "banco": nombreBanco(pago.getCodigoBanco())
+                    })
 
-#     # except FileNotFoundError:
-#     #     mensajes_recibidos = {}
-#     #     usuarios_mencionados = set()
-#     #     hashtags_incluidos = set()
-#     #     menciones_usuario = {}
-#     #     menciones_hashtag = {}
-#     #     palabras_positivas = 0
-#     #     palabras_negativas = 0
-#     #     palabras_neutras = 0
-#     #     palabras_negativas_rechazadas = 0
-#     #     palabras_positivas_rechazadas = 0
-#     #     historial_configuraciones = []
+                estado_cuenta = unificar_y_ordenar_estado_cuenta(debitos, creditos)
+                estado_cuenta["cliente"] = cliente.getNombre()
+                estado_cuenta["nit"] = cliente.getNit()
+                estado_cuenta["saldo"] = cliente.getSaldo()
+                lista_movimientos.append(estado_cuenta)
+                descargar_pdf(lista_movimientos)
+                return jsonify(lista_movimientos)
+            else:
+                return jsonify({"error": "El cliente no existe"}), 404
+
+    except Exception as e:
+        print(e)
+        return jsonify({"error": "Ha ocurrido un error"}), 500
+    
+
+def obtener_tercer_mes_anterior(fecha):
+    # Obtener el mes y el año de la fecha proporcionada
+    mes_actual = fecha.month
+    anio_actual = fecha.year
+
+    # Calcular el tercer mes anterior
+    tercer_mes_anterior = mes_actual - 2  # Tercer mes anterior
+    anio_tercer_mes_anterior = anio_actual
+    if tercer_mes_anterior <= 0:
+        tercer_mes_anterior += 12
+        anio_tercer_mes_anterior -= 1
+
+    return datetime(anio_tercer_mes_anterior, tercer_mes_anterior, 1)
+    
+@app.route("/resumenBanco", methods=["GET"])
+def resumenBanco():
+    global Pagos, Bancos
+    lista_bancos = []
+    strFecha = request.form.get('fecha')  # Usamos args en lugar de form para GET
+    dia, mes, anio = map(int, strFecha.split('/'))
+    fecha = datetime(anio, mes, dia)
+    
+    # Obtener el tercer mes anterior a la fecha proporcionada
+    tercer_mes_anterior = obtener_tercer_mes_anterior(fecha)
+    
+    for banco in Bancos:
+        for i in range(3):
+            # Calcular el mes correspondiente
+            mes_actual = tercer_mes_anterior.month + i
+            anio_actual = tercer_mes_anterior.year
+            if mes_actual <= 0:
+                mes_actual += 12
+                anio_actual -= 1
+            mes_actual_str = f'{mes_actual:02d}'  # Formatear mes a dos dígitos
+            
+            # Calcular el total de pagos para este banco en este mes
+            total_mes = 0
+            for pago in Pagos:
+                if pago.getCodigoBanco() == banco.getCodigo() and pago.getFecha().month == mes_actual and pago.getFecha().year == anio_actual:
+                    total_mes += pago.getValor()            
+            # Agregar el resumen a la lista de bancos
+            lista_bancos.append({
+                "banco": banco.getNombre(),
+                "mes": mes_actual_str,
+                "total": total_mes
+            })
+
+    # Ordenar la lista de bancos por nombre y mes
+    lista_bancos.sort(key=lambda x: (x["banco"], x["mes"]))
+    
+    # Agrupar los datos por mes
+    resumen_por_mes = {}
+    for resumen in lista_bancos:
+        mes = resumen['mes']
+        if mes not in resumen_por_mes:
+            resumen_por_mes[mes] = []
+        resumen_por_mes[mes].append({
+            "banco": resumen['banco'],
+            "total": resumen['total']
+        })
+
+    return jsonify(resumen_por_mes)
 
 
+
+    
+def generarPdf(listaMovimientos):
+    buffer = BytesIO()
+    doc = canvas.Canvas(buffer, pagesize=landscape(letter))
+
+    for idx, movimiento in enumerate(listaMovimientos):
+        if idx > 0:
+            doc.showPage()  # Nueva página para cada cliente después del primero
+
+        # Encabezado
+        doc.setFont("Helvetica-Bold", 16)
+        doc.drawCentredString(400, 750, "Estado de Cuenta")
+
+        y_position = 500  # Posición inicial más abajo
+
+        # Datos del cliente
+        doc.setFont("Helvetica-Bold", 12)
+        doc.drawString(50, y_position, f"Cliente: {movimiento['cliente']}")
+        doc.drawString(50, y_position - 20, f"NIT: {movimiento['nit']}")
+        doc.drawString(50, y_position - 40, f"Saldo: Q{movimiento['saldo']}")
+
+        y_position -= 70
+
+        # Movimientos
+        movimientos_data = [['Tipo', 'Fecha', 'Valor', 'Detalles']]
+        for m in movimiento['movimientos']:
+            tipo = m['tipo']
+            fecha = m['fecha']
+            valor = f"Q{m['valor']}"
+            detalles = ""
+
+            if tipo == 'debito':
+                detalles = f"Núm. Factura: {m['num_factura']}"
+            elif tipo == 'credito':
+                detalles = f"Código Banco: {m['codigo_banco']}, Banco: {m['banco']}"
+
+            movimientos_data.append([tipo, fecha, valor, detalles])
+
+        table = Table(movimientos_data, colWidths=[80, 80, 80, 300])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]))
+
+        table.wrapOn(doc, 800, 600)
+        table.drawOn(doc, 50, y_position - table._height - 20)  # Ajuste de posición de la tabla
+        y_position -= table._height + 120  # Ajuste de posición vertical
+
+    doc.save()
+
+    # Obtener el contenido del buffer como bytes
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    ruta_archivo = os.path.join('Salidas', 'estado_cuenta.pdf')  # Ruta de salida del archivo
+    with open(ruta_archivo, 'wb') as f:
+        f.write(pdf_bytes)
+
+    return ruta_archivo
+
+def descargar_pdf(lista_movimientos):
+
+     ruta_archivo = generarPdf(lista_movimientos)
+     webbrowser.open_new_tab(ruta_archivo)
+     return send_file(ruta_archivo, as_attachment=True)
 
 app.run(debug=True, port=5000)
-
-
-
-
-
