@@ -1,0 +1,161 @@
+{% extends 'index.html' %}
+
+{% block title %}Página de Inicio{% endblock %}
+
+{% block contenido %}
+<div class="container mt-5">
+    <h1 style="text-align: center;">Estado de Cuenta</h1>
+    <form id="formNit" class="form-inline mt-3 text-center" method="GET" action="{% url 'obtenerEstadoCuenta' %}"
+        enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="nit" class="mr-sm-2">NIT:</label>
+        <input type="text" class="form-control mr-sm-2" id="nit" name="nit" placeholder="Ingrese NIT">
+        <button type="submit" class="btn btn-primary" onclick="mostrarSpinner()">Generar Estado de Cuenta</button>
+        <div id="spinner" style="display: none;">
+            <!-- Aquí puedes colocar tu spinner -->
+        </div>
+    </form>
+    {% if mensaje %}
+    {% if mensaje != 'Error al obtener los datos' %}
+    <div class="alert alert-success mt-3" role="alert">
+        {{ mensaje }}
+    </div>
+    {% else %}
+    <div class="alert alert-danger mt-3" role="alert">
+        {{ mensaje }}
+    </div>
+    {% endif %}
+    <button class="btn btn-primary" onclick="generarPDF()">Imprimir</button>
+    {% endif %}
+    <div id="estadoCuenta" class="mt-4">
+        {% if json %}
+        {% for json in json %}
+        <div class="card" style="margin-bottom: 10px;">
+            <div class="card-header" style="background: black;color: white;">
+                <h3 class="mb-0" style="text-align: center;">Estado de Cuenta</h3>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col">
+                        <strong>Cliente:</strong> {{ json.cliente }}
+                    </div>
+                    <div class="col">
+                        <strong>NIT:</strong> {{ json.nit }}
+                    </div>
+                    <div class="col">
+                        <strong>Saldo:</strong> {{ json.saldo }}
+                    </div>
+                </div>
+                <hr>
+                <h4 class="mb-3 text-center">Movimientos</h4>
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Abono</th>
+                                <th>Cargo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for movimiento in json.movimientos %}
+                            <tr>
+                                <td>{{ movimiento.fecha }}</td>
+                                <td>
+                                    {% if movimiento.tipo == 'credito' %}
+                                    {{ movimiento.valor }} ({{ movimiento.banco }})
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if movimiento.tipo == 'debito' %}
+                                    {{ movimiento.valor }} (Factura {{ movimiento.num_factura }})
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+
+        <script>
+            function generarPDF() {
+                const docDefinition = {
+                    content: [
+                        { text: 'Estado de Cuenta', style: 'header' }
+                    ],
+                    styles: {
+                        header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] },
+                        subheader: { fontSize: 14, bold: true, margin: [0, 10, 0, 5] }
+                    }
+                };
+        
+                // Obtener todas las cartas
+                const cards = document.querySelectorAll('.card');
+        
+                cards.forEach(card => {
+                    const cliente = card.querySelector('.col:nth-child(1)').innerText.trim();
+                    const nit = card.querySelector('.col:nth-child(2)').innerText.trim();
+                    const saldo = card.querySelector('.col:nth-child(3)').innerText.trim();
+        
+                    const movimientosTable = card.querySelector('table');
+                    const rows = movimientosTable.querySelectorAll('tbody tr');
+        
+                    // Verificar que rows sea un NodeList válido y no esté vacío
+                    if (rows && rows.length > 0) {
+                        const data = Array.from(rows).map(row => {
+                            return Array.from(row.querySelectorAll('td')).map(cell => cell.innerText.trim());
+                        });
+        
+                        docDefinition.content.push(
+                            { text: `${cliente}`, style: 'subheader' },
+                            { text: `${nit}`, style: 'subheader' },
+                            { text: `${saldo}`, style: 'subheader' },
+                            { text: 'Movimientos', style: 'subheader' },
+                            {
+                                table: {
+                                    headerRows: 1,
+                                    widths: ['*', '*', '*'],
+                                    body: [
+                                        ['Fecha', 'Abono', 'Cargo'],
+                                        ...data
+                                    ]
+                                }
+                            },
+                            { text: '', pageBreak: 'after' } // Salto de página después de cada carta
+                        );
+                    }
+                });
+        
+                pdfMake.createPdf(docDefinition).download('estado_de_cuenta.pdf');
+            }
+        </script>
+        
+        {% endfor %}
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- Scripts de Bootstrap y Spin.js -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Incluir una versión compatible de Spin.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/spin.js/2.3.2/spin.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.68/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.68/vfs_fonts.js"></script>
+
+<script>
+    function mostrarSpinner() {
+        var target = document.getElementById('spinner');
+        var spinner = new Spinner().spin(target); // Crear y mostrar el spinner
+        target.style.display = 'block'; // Mostrar el contenedor del spinner
+    }
+
+    //ocultar la alerta despues de 5 segundos
+    setTimeout(function () {
+        document.querySelector('.alert').style.display = 'none';
+    }, 2000);
+</script>
+{% endblock %}

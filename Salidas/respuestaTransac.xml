@@ -1,12 +1,1 @@
-<transacciones>
-    <facturas>
-        <nuevasFacturas>2</nuevasFacturas>
-        <facturasDuplicadas>2</facturasDuplicadas>
-        <facturasConError>0</facturasConError>
-    </facturas>
-    <pagos>
-        <nuevosPagos>1</nuevosPagos>
-        <pagosDuplicados>0</pagosDuplicados>
-        <pagosConError>0</pagosConError>
-    </pagos>
-</transacciones>
+<transacciones><facturas><nuevasFacturas>3</nuevasFacturas><facturasDuplicadas>0</facturasDuplicadas><facturasConError>1</facturasConError></facturas><pagos><nuevosPagos>2</nuevosPagos><pagosDuplicados>0</pagosDuplicados><pagosConError>1</pagosConError></pagos></transacciones>
